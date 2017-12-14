@@ -2,10 +2,9 @@
 
 import numpy as np
 import pandas as pd
-from sklearn import *
-from datetime import datetime
+from sklearn import preprocessing
+from sklearn.model_selection import GridSearchCV
 import xgboost as xgb
-import gc
 
 # Data wrangling brought to you by the1owl
 # https://www.kaggle.com/the1owl/surprise-me
@@ -102,16 +101,11 @@ train_y = np.log1p(train['visitors'].values)
 print(train_x.shape, train_y.shape)
 test_x = test.drop(['id','air_store_id','visit_date','visitors'], axis=1)
 
-# Create training / validation split
-# split = 200000
-# x_train, y_train, x_valid, y_valid = x_train[:split], y_train[:split], x_train[split:], y_train[split:]
-
-### parameter tuning of xgboost
+# parameter tuning of xgboost
 # start from default setting
-xgb0 = xgb.XGBRegressor(max_depth=3,
-                        learning_rate=0.1,
+xgb0 = xgb.XGBRegressor(max_depth=7,
+                        learning_rate=0.04,
                         n_estimators=100,
-                        # n_jobs=4,
                         objective='reg:linear',
                         gamma=0,
                         min_child_weight=1,
@@ -123,3 +117,136 @@ xgb0.fit(train_x, train_y)
 predict_y = xgb0.predict(test_x)
 test['visitors'] = np.expm1(predict_y)
 test[['id','visitors']].to_csv('xgb0_submission.csv', index=False, float_format='%.3f')   # LB0.516
+
+# Grid seach on subsample and max_features
+param_test1 = {
+    'max_depth':range(3,20,1),
+    'min_child_weight':range(2,8,1)
+}
+
+gsearch1 = GridSearchCV(estimator=xgb.XGBRegressor(max_depth=7,
+                                                   learning_rate=0.04,
+                                                   n_estimators=100,
+                                                   gamma=0,
+                                                   objective='reg:linear',
+                                                   min_child_weight=1,
+                                                   subsample=1,
+                                                   colsample_bytree=1,
+                                                   scale_pos_weight=1,
+                                                   seed=27),
+                        param_grid=param_test1,
+                        scoring='neg_mean_squared_error',
+                        verbose=2,
+                        iid=False,
+                        cv=5)
+gsearch1.fit(train_x, train_y)
+
+print(gsearch1.grid_scores_, gsearch1.best_params_, gsearch1.best_score_)
+
+predict_y = gsearch1.predict(test_x)
+test['visitors'] = np.expm1(predict_y)
+test[['id','visitors']].to_csv('xgb1_submission.csv', index=False, float_format='%.3f')   # LB0.513
+
+#Grid seach on gamma
+param_test2 = {
+ 'gamma':[i/100.0 for i in range(0,100,5)]
+}
+
+gsearch2 = GridSearchCV(estimator=xgb.XGBRegressor(max_depth=gsearch1.best_params_['max_depth'],
+                                                   learning_rate=0.04,
+                                                   n_estimators=100,
+                                                   gamma=0,
+                                                   objective='reg:linear',
+                                                   min_child_weight=gsearch1.best_params_['min_child_weight'],
+                                                   subsample=1,
+                                                   colsample_bytree=1,
+                                                   scale_pos_weight=1,
+                                                   seed=27),
+                        param_grid=param_test2,
+                        scoring='neg_mean_squared_error',
+                        verbose=2,
+                        iid=False,
+                        cv=5)
+gsearch2.fit(train_x, train_y)
+
+print(gsearch2.grid_scores_, gsearch2.best_params_, gsearch2.best_score_)
+
+predict_y = gsearch2.predict(test_x)
+test['visitors'] = np.expm1(predict_y)
+test[['id','visitors']].to_csv('xgb2_submission.csv', index=False, float_format='%.3f')   # LB0.512
+
+#Grid seach on subsample, colsample_bytree
+param_test3 = {
+ 'subsample':[i/100.0 for i in range(6,100,5)],
+ 'colsample_bytree':[i/100.0 for i in range(20,100)]
+}
+
+gsearch3 = GridSearchCV(estimator=xgb.XGBRegressor(max_depth=gsearch1.best_params_['max_depth'],
+                                                   learning_rate=0.04,
+                                                   n_estimators=100,
+                                                   gamma=gsearch2.best_params_['gamma'],
+                                                   min_child_weight=gsearch1.best_params_['min_child_weight'],
+                                                   objective='reg:linear',
+                                                   subsample=1,
+                                                   colsample_bytree=1,
+                                                   scale_pos_weight=1,
+                                                   seed=27),
+                        param_grid=param_test3,
+                        scoring='neg_mean_squared_error',
+                        verbose=2,
+                        iid=False,
+                        cv=5)
+gsearch3.fit(train_x, train_y)
+
+print(gsearch3.grid_scores_, gsearch3.best_params_, gsearch3.best_score_)
+
+predict_y = gsearch3.predict(test_x)
+test['visitors'] = np.expm1(predict_y)
+test[['id','visitors']].to_csv('xgb3_submission.csv', index=False, float_format='%.3f')   # LB0.512
+
+#Grid seach on reg_alpha
+param_test4 = {
+ 'reg_alpha':[1e-5, 1e-4, 1e-3, 1e-2, 0.1, 1, 10, 100]
+}
+
+gsearch4 = GridSearchCV(estimator=xgb.XGBRegressor(max_depth=gsearch1.best_params_['max_depth'],
+                                                   learning_rate=0.04,
+                                                   n_estimators=100,
+                                                   gamma=gsearch2.best_params_['gamma'],
+                                                   min_child_weight=gsearch1.best_params_['min_child_weight'],
+                                                   objective='reg:linear',
+                                                   subsample=gsearch3.best_params_['subsample'],
+                                                   colsample_bytree=gsearch3.best_params_['colsample_bytree'],
+                                                   scale_pos_weight=1,
+                                                   reg_alpha=0.005,
+                                                   seed=27),
+                        param_grid=param_test4,
+                        scoring='neg_mean_squared_error',
+                        verbose=2,
+                        iid=False,
+                        cv=5)
+gsearch4.fit(train_x, train_y)
+
+print(gsearch4.grid_scores_, gsearch4.best_params_, gsearch4.best_score_)
+
+predict_y = gsearch4.predict(test_x)
+test['visitors'] = np.expm1(predict_y)
+test[['id','visitors']].to_csv('xgb4_submission.csv', index=False, float_format='%.3f')   # LB0.512
+
+# recalculate boosting round w/ reduced lr and increased estimators
+xgb5 = xgb.XGBRegressor(max_depth=gsearch1.best_params_['max_depth'],
+                        learning_rate=0.001,
+                        n_estimators=5000,
+                        gamma=gsearch2.best_params_['gamma'],
+                        min_child_weight=gsearch1.best_params_['min_child_weight'],
+                        objective='reg:linear',
+                        subsample=gsearch3.best_params_['subsample'],
+                        colsample_bytree=gsearch3.best_params_['colsample_bytree'],
+                        scale_pos_weight=1,
+                        reg_alpha=gsearch4.best_params_['reg_alpha'],
+                        seed=27)
+
+xgb5.fit(train_x, train_y)
+predict_y = xgb5.predict(test_x)
+test['visitors'] = np.expm1(predict_y)
+test[['id','visitors']].to_csv('xgb5_submission.csv', index=False, float_format='%.3f')   # LB0.512
