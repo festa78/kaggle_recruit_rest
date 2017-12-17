@@ -3,8 +3,7 @@
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing
-# from sklearn.model_selection import GridSearchCV
-import xgboost as xgb
+from sklearn.model_selection import GridSearchCV
 import lightgbm as lgb
 
 # Data wrangling brought to you by the1owl
@@ -150,37 +149,46 @@ train_y = np.log1p(train['visitors'].values)
 print(train_x.shape, train_y.shape)
 test_x = test.drop(['id', 'air_store_id', 'visit_date', 'visitors'], axis=1)
 
-# xgboost
-# start from default setting
-boost_params = {'eval_metric': 'rmse'}
-xgb0 = xgb.XGBRegressor(
-    max_depth=7,
-    learning_rate=0.04,
-    n_estimators=10000,
-    objective='reg:linear',
-    gamma=0,
-    min_child_weight=1,
-    subsample=1,
-    colsample_bytree=1,
-    scale_pos_weight=1,
-    seed=27,
-    **boost_params)
-
-xgb0.fit(train_x, train_y)
-xgb0_predict = xgb0.predict(test_x)
-
-# lightgbm
-# start from default setting
+# parameter tuning of lightgbm
+# start from default setting with dart
 gbm0 = lgb.LGBMRegressor(
     objective='regression',
+    boosting_type='dart',
     num_leaves=31,
+    max_depth=-1,
     learning_rate=0.05,
     n_estimators=10000)
 
 gbm0.fit(train_x, train_y, eval_metric='rmse')
-gbm0_predict = gbm0.predict(test_x)
-
-# simple ensemble
-test['visitors'] = np.expm1((xgb0_predict + gbm0_predict) / 2.)
+predict_y = gbm0.predict(test_x)
+test['visitors'] = np.expm1(predict_y)
 test[['id', 'visitors']].to_csv(
-    'ens0_submission.csv', index=False, float_format='%.3f')  # LB0.494
+    'gbm0_submission.csv', index=False, float_format='%.3f')  # LB0.496
+
+# grid search
+param_test1 = {
+    'max_depth': range(3, 20, 1),
+    'num_leaves': range(20, 50, 2),
+    'learning_rate': [0.1, 0.05, 0.01, 0.005, 0.001],
+}
+
+gsearch1 = GridSearchCV(
+    estimator=lgb.LGBMRegressor(
+        objective='regression',
+        boosting_type='dart',
+        num_leaves=31,
+        max_depth=-1,
+        learning_rate=0.05,
+        n_estimators=10000),
+    param_grid=param_test1,
+    verbose=2,
+    iid=False,
+    cv=5)
+gsearch1.fit(train_x, train_y)
+
+print(gsearch1.grid_scores_, gsearch1.best_params_, gsearch1.best_score_)
+
+predict_y = gsearch1.predict(test_x)
+test['visitors'] = np.expm1(predict_y)
+test[['id', 'visitors']].to_csv(
+    'gbm1_submission.csv', index=False, float_format='%.3f')  # LB

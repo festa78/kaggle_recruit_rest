@@ -161,4 +161,4 @@ gbm0.fit(train_x, train_y, eval_metric='rmse')
 predict_y = gbm0.predict(test_x)
 test['visitors'] = np.expm1(predict_y)
 test[['id', 'visitors']].to_csv(
-    'gbm0_submission.csv', index=False, float_format='%.3f')  # LB
+    'gbm0_submission.csv', index=False, float_format='%.3f')  # LB0.493

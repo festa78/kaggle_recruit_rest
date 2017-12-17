@@ -172,7 +172,7 @@ xgb0.fit(train_x, train_y)
 predict_y = xgb0.predict(test_x)
 test['visitors'] = np.expm1(predict_y)
 test[['id', 'visitors']].to_csv(
-    'xgb0_submission.csv', index=False, float_format='%.3f')  # LB0.516
+    'xgb0_submission.csv', index=False, float_format='%.3f')  # LB0.500
 
 # Grid seach on subsample and max_features
 param_test1 = {
