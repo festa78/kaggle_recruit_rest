@@ -154,8 +154,8 @@ test_x = test.drop(['id', 'air_store_id', 'visit_date', 'visitors'], axis=1)
 # start from default setting
 boost_params = {'eval_metric': 'rmse'}
 xgb0 = xgb.XGBRegressor(
-    max_depth=7,
-    learning_rate=0.04,
+    max_depth=8,
+    learning_rate=0.01,
     n_estimators=10000,
     objective='reg:linear',
     gamma=0,
@@ -173,8 +173,8 @@ xgb0_predict = xgb0.predict(test_x)
 # start from default setting
 gbm0 = lgb.LGBMRegressor(
     objective='regression',
-    num_leaves=31,
-    learning_rate=0.05,
+    num_leaves=60,
+    learning_rate=0.01,
     n_estimators=10000)
 
 gbm0.fit(train_x, train_y, eval_metric='rmse')
@@ -183,4 +183,4 @@ gbm0_predict = gbm0.predict(test_x)
 # simple ensemble
 test['visitors'] = np.expm1((xgb0_predict + gbm0_predict) / 2.)
 test[['id', 'visitors']].to_csv(
-    'ens0_submission.csv', index=False, float_format='%.3f')  # LB0.494
+    'ens0_submission.csv', index=False, float_format='%.3f')  # LB0.492

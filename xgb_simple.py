@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from sklearn import *
 from datetime import datetime
-from lightgbm import LGBMRegressor
+from xgboost import XGBRegressor
 
 data = {
     'tra': pd.read_csv('../input/air_visit_data.csv'),
@@ -113,16 +113,24 @@ col = [c for c in train if c not in ['id', 'air_store_id', 'visit_date','visitor
 train = train.fillna(-1)
 test = test.fillna(-1)
 
-# parameter tuning of lightgbm
+# parameter tuning of xgboost
 # start from default setting
-gbm0 = LGBMRegressor(
-    objective='regression',
-    num_leaves=60,
+boost_params = {'eval_metric': 'rmse'}
+xgb0 = XGBRegressor(
+    max_depth=8,
     learning_rate=0.01,
-    n_estimators=10000)
+    n_estimators=10000,
+    objective='reg:linear',
+    gamma=0,
+    min_child_weight=1,
+    subsample=1,
+    colsample_bytree=1,
+    scale_pos_weight=1,
+    seed=27,
+    **boost_params)
 
-gbm0.fit(train[col], np.log1p(train['visitors'].values), eval_metric='rmse')
-test['visitors'] = gbm0.predict(test[col])
+xgb0.fit(train[col], np.log1p(train['visitors'].values))
+test['visitors']= xgb0.predict(test[col])
 test['visitors'] = np.expm1(test['visitors']).clip(lower=0.)
 sub1 = test[['id','visitors']].copy()
 del train; del data;
@@ -169,5 +177,4 @@ sub2 = sample_submission[['id', 'visitors']].copy()
 sub_merge = pd.merge(sub1, sub2, on='id', how='inner')
 
 sub_merge['visitors'] = 0.6*sub_merge['visitors_x'] + 0.4*sub_merge['visitors_y']* 1.1
-sub_merge[['id', 'visitors']].to_csv('gbm0_submission.csv', index=False)
-
+sub_merge[['id', 'visitors']].to_csv('xgb0_submission.csv', index=False)

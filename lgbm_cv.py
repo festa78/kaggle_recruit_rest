@@ -151,31 +151,29 @@ test_x = test.drop(['id', 'air_store_id', 'visit_date', 'visitors'], axis=1)
 
 # parameter tuning of lightgbm
 # start from default setting with dart
-gbm0 = lgb.LGBMRegressor(
-    objective='regression',
-    boosting_type='dart',
-    num_leaves=31,
-    max_depth=-1,
-    learning_rate=0.05,
-    n_estimators=10000)
+# gbm0 = lgb.LGBMRegressor(
+#     objective='regression',
+#     num_leaves=31,
+#     max_depth=-1,
+#     learning_rate=0.05,
+#     n_estimators=10000)
 
-gbm0.fit(train_x, train_y, eval_metric='rmse')
-predict_y = gbm0.predict(test_x)
-test['visitors'] = np.expm1(predict_y)
-test[['id', 'visitors']].to_csv(
-    'gbm0_submission.csv', index=False, float_format='%.3f')  # LB0.496
+# gbm0.fit(train_x, train_y, eval_metric='rmse')
+# predict_y = gbm0.predict(test_x)
+# test['visitors'] = np.expm1(predict_y)
+# test[['id', 'visitors']].to_csv(
+#     'gbm0_submission.csv', index=False, float_format='%.3f')
 
 # grid search
 param_test1 = {
-    'max_depth': range(3, 20, 1),
-    'num_leaves': range(20, 50, 2),
-    'learning_rate': [0.1, 0.05, 0.01, 0.005, 0.001],
+    # 'max_depth': [-1, 5, 10],
+    'num_leaves': [29, 31, 33],
+    'learning_rate': [0.01, 0.05, 0.1]
 }
 
 gsearch1 = GridSearchCV(
     estimator=lgb.LGBMRegressor(
         objective='regression',
-        boosting_type='dart',
         num_leaves=31,
         max_depth=-1,
         learning_rate=0.05,
@@ -189,6 +187,7 @@ gsearch1.fit(train_x, train_y)
 print(gsearch1.grid_scores_, gsearch1.best_params_, gsearch1.best_score_)
 
 predict_y = gsearch1.predict(test_x)
+predict_y[predict_y < 0.] = 0.
 test['visitors'] = np.expm1(predict_y)
 test[['id', 'visitors']].to_csv(
-    'gbm1_submission.csv', index=False, float_format='%.3f')  # LB
+    'gbm1_submission.csv', index=False, float_format='%.3f')
