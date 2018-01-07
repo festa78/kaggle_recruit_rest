@@ -1,14 +1,12 @@
 #!/usr/bin/python3 -B
 
+import glob, re
 import numpy as np
 import pandas as pd
-from sklearn import preprocessing
-# from sklearn.model_selection import GridSearchCV
-import xgboost as xgb
-import lightgbm as lgb
-
-# Data wrangling brought to you by the1owl
-# https://www.kaggle.com/the1owl/surprise-me
+from sklearn import *
+from datetime import datetime
+from lightgbm import LGBMRegressor
+from xgboost import XGBRegressor
 
 data = {
     'tra':
@@ -40,13 +38,24 @@ for df in ['ar', 'hr']:
     data[df]['reserve_datetime'] = data[df]['reserve_datetime'].dt.date
     data[df]['reserve_datetime_diff'] = data[df].apply(
         lambda r: (r['visit_datetime'] - r['reserve_datetime']).days, axis=1)
-    data[df] = data[df].groupby(
+    tmp1 = data[df].groupby(
         ['air_store_id', 'visit_datetime'], as_index=False)[[
             'reserve_datetime_diff', 'reserve_visitors'
         ]].sum().rename(columns={
-            'visit_datetime': 'visit_date'
+            'visit_datetime': 'visit_date',
+            'reserve_datetime_diff': 'rs1',
+            'reserve_visitors': 'rv1'
         })
-    print(data[df].head())
+    tmp2 = data[df].groupby(
+        ['air_store_id', 'visit_datetime'], as_index=False)[[
+            'reserve_datetime_diff', 'reserve_visitors'
+        ]].mean().rename(columns={
+            'visit_datetime': 'visit_date',
+            'reserve_datetime_diff': 'rs2',
+            'reserve_visitors': 'rv2'
+        })
+    data[df] = pd.merge(
+        tmp1, tmp2, how='inner', on=['air_store_id', 'visit_date'])
 
 data['tra']['visit_date'] = pd.to_datetime(data['tra']['visit_date'])
 data['tra']['dow'] = data['tra']['visit_date'].dt.dayofweek
@@ -108,25 +117,68 @@ tmp = data['tra'].groupby(
 stores = pd.merge(stores, tmp, how='left', on=['air_store_id', 'dow'])
 
 stores = pd.merge(stores, data['as'], how='left', on=['air_store_id'])
+# NEW FEATURES FROM Georgii Vyshnia
+stores['air_genre_name'] = stores['air_genre_name'].map(
+    lambda x: str(str(x).replace('/', ' ')))
+stores['air_area_name'] = stores['air_area_name'].map(
+    lambda x: str(str(x).replace('-', ' ')))
 lbl = preprocessing.LabelEncoder()
+for i in range(10):
+    stores['air_genre_name' + str(
+        i
+    )] = lbl.fit_transform(stores['air_genre_name'].map(
+        lambda x: str(str(x).split(' ')[i]) if len(str(x).split(' ')) > i else ''
+    ))
+    stores['air_area_name' + str(
+        i
+    )] = lbl.fit_transform(stores['air_area_name'].map(
+        lambda x: str(str(x).split(' ')[i]) if len(str(x).split(' ')) > i else ''
+    ))
 stores['air_genre_name'] = lbl.fit_transform(stores['air_genre_name'])
 stores['air_area_name'] = lbl.fit_transform(stores['air_area_name'])
 
 data['hol']['visit_date'] = pd.to_datetime(data['hol']['visit_date'])
 data['hol']['day_of_week'] = lbl.fit_transform(data['hol']['day_of_week'])
 data['hol']['visit_date'] = data['hol']['visit_date'].dt.date
-
 train = pd.merge(data['tra'], data['hol'], how='left', on=['visit_date'])
 test = pd.merge(data['tes'], data['hol'], how='left', on=['visit_date'])
 
-train = pd.merge(data['tra'], stores, how='left', on=['air_store_id', 'dow'])
-test = pd.merge(data['tes'], stores, how='left', on=['air_store_id', 'dow'])
+train = pd.merge(train, stores, how='left', on=['air_store_id', 'dow'])
+test = pd.merge(test, stores, how='left', on=['air_store_id', 'dow'])
 
 for df in ['ar', 'hr']:
     train = pd.merge(
         train, data[df], how='left', on=['air_store_id', 'visit_date'])
     test = pd.merge(
         test, data[df], how='left', on=['air_store_id', 'visit_date'])
+
+train['id'] = train.apply(lambda r: '_'.join([str(r['air_store_id']), str(r['visit_date'])]), axis=1)
+
+train['total_reserv_sum'] = train['rv1_x'] + train['rv1_y']
+train['total_reserv_mean'] = (train['rv2_x'] + train['rv2_y']) / 2
+train['total_reserv_dt_diff_mean'] = (train['rs2_x'] + train['rs2_y']) / 2
+
+test['total_reserv_sum'] = test['rv1_x'] + test['rv1_y']
+test['total_reserv_mean'] = (test['rv2_x'] + test['rv2_y']) / 2
+test['total_reserv_dt_diff_mean'] = (test['rs2_x'] + test['rs2_y']) / 2
+
+# NEW FEATURES FROM JMBULL
+train['date_int'] = train['visit_date'].apply(
+    lambda x: x.strftime('%Y%m%d')).astype(int)
+test['date_int'] = test['visit_date'].apply(
+    lambda x: x.strftime('%Y%m%d')).astype(int)
+train['var_max_lat'] = train['latitude'].max() - train['latitude']
+train['var_max_long'] = train['longitude'].max() - train['longitude']
+test['var_max_lat'] = test['latitude'].max() - test['latitude']
+test['var_max_long'] = test['longitude'].max() - test['longitude']
+
+# NEW FEATURES FROM Georgii Vyshnia
+train['lon_plus_lat'] = train['longitude'] + train['latitude']
+test['lon_plus_lat'] = test['longitude'] + test['latitude']
+
+lbl = preprocessing.LabelEncoder()
+train['air_store_id2'] = lbl.fit_transform(train['air_store_id'])
+test['air_store_id2'] = lbl.transform(test['air_store_id'])
 
 col = [
     c for c in train
@@ -135,25 +187,10 @@ col = [
 train = train.fillna(-1)
 test = test.fillna(-1)
 
-print('Binding to float32')
-
-for c, dtype in zip(train.columns, train.dtypes):
-    if dtype == np.float64:
-        train[c] = train[c].astype(np.float32)
-
-for c, dtype in zip(test.columns, test.dtypes):
-    if dtype == np.float64:
-        test[c] = test[c].astype(np.float32)
-
-train_x = train.drop(['air_store_id', 'visit_date', 'visitors'], axis=1)
-train_y = np.log1p(train['visitors'].values)
-print(train_x.shape, train_y.shape)
-test_x = test.drop(['id', 'air_store_id', 'visit_date', 'visitors'], axis=1)
-
 # xgboost
 # start from default setting
 boost_params = {'eval_metric': 'rmse'}
-xgb0 = xgb.XGBRegressor(
+xgb0 = XGBRegressor(
     max_depth=8,
     learning_rate=0.01,
     n_estimators=10000,
@@ -166,21 +203,109 @@ xgb0 = xgb.XGBRegressor(
     seed=27,
     **boost_params)
 
-xgb0.fit(train_x, train_y)
-xgb0_predict = xgb0.predict(test_x)
+xgb0.fit(train[col], np.log1p(train['visitors'].values))
+xgb0_pred = xgb0.predict(test[col])
+
+xgb1 = XGBRegressor(
+    learning_rate=0.2,
+    random_state=3,
+    n_estimators=200,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    max_depth=10)
+
+xgb1.fit(train[col], np.log1p(train['visitors'].values))
+xgb1_pred = xgb1.predict(test[col])
 
 # lightgbm
 # start from default setting
-gbm0 = lgb.LGBMRegressor(
+gbm0 = LGBMRegressor(
     objective='regression',
     num_leaves=60,
     learning_rate=0.01,
     n_estimators=10000)
 
-gbm0.fit(train_x, train_y, eval_metric='rmse')
-gbm0_predict = gbm0.predict(test_x)
+gbm0.fit(train[col], np.log1p(train['visitors'].values), eval_metric='rmse')
+gbm0_pred = gbm0.predict(test[col])
 
-# simple ensemble
-test['visitors'] = np.expm1((xgb0_predict + gbm0_predict) / 2.)
-test[['id', 'visitors']].to_csv(
-    'ens0_submission.csv', index=False, float_format='%.3f')  # LB0.492
+gb0 = ensemble.GradientBoostingRegressor(
+    learning_rate=0.2,
+    random_state=3,
+    n_estimators=200,
+    subsample=0.8,
+    max_depth=10)
+gb0.fit(train[col], np.log1p(train['visitors'].values))
+gb0_pred = gb0.predict(test[col])
+
+knn0 = neighbors.KNeighborsRegressor(n_jobs=-1, n_neighbors=4)
+knn0.fit(train[col], np.log1p(train['visitors'].values))
+knn0_pred = knn0.predict(test[col])
+
+test['visitors'] = 0.3 * xgb0_pred + 0.3 * xgb1_pred + 0.2 * gbm0_pred + \
+                   0.2 * gb0_pred + 0.2 * knn0_pred
+test['visitors'] = np.expm1(test['visitors']).clip(lower=0.)
+sub1 = test[['id', 'visitors']].copy()
+del train
+del data
+
+# from hklee
+# https://www.kaggle.com/zeemeen/weighted-mean-comparisons-lb-0-497-1st/code
+dfs = {
+    re.search('/([^/\.]*)\.csv', fn).group(1): pd.read_csv(fn)
+    for fn in glob.glob('../input/*.csv')
+}
+
+for k, v in dfs.items():
+    locals()[k] = v
+
+wkend_holidays = date_info.apply(
+    (lambda x: (x.day_of_week == 'Sunday' or x.day_of_week == 'Saturday') and x.holiday_flg == 1
+     ),
+    axis=1)
+date_info.loc[wkend_holidays, 'holiday_flg'] = 0
+date_info['weight'] = ((date_info.index + 1) / len(date_info))**5
+
+visit_data = air_visit_data.merge(
+    date_info, left_on='visit_date', right_on='calendar_date', how='left')
+visit_data.drop('calendar_date', axis=1, inplace=True)
+visit_data['visitors'] = visit_data.visitors.map(pd.np.log1p)
+
+wmean = lambda x: ((x.weight * x.visitors).sum() / x.weight.sum())
+visitors = visit_data.groupby(['air_store_id', 'day_of_week',
+                               'holiday_flg']).apply(wmean).reset_index()
+visitors.rename(
+    columns={0: 'visitors'},
+    inplace=True)  # cumbersome, should be better ways.
+
+sample_submission['air_store_id'] = sample_submission.id.map(
+    lambda x: '_'.join(x.split('_')[:-1]))
+sample_submission['calendar_date'] = sample_submission.id.map(
+    lambda x: x.split('_')[2])
+sample_submission.drop('visitors', axis=1, inplace=True)
+sample_submission = sample_submission.merge(
+    date_info, on='calendar_date', how='left')
+sample_submission = sample_submission.merge(
+    visitors, on=['air_store_id', 'day_of_week', 'holiday_flg'], how='left')
+
+missings = sample_submission.visitors.isnull()
+sample_submission.loc[missings, 'visitors'] = sample_submission[
+    missings].merge(
+        visitors[visitors.holiday_flg == 0],
+        on=('air_store_id', 'day_of_week'),
+        how='left')['visitors_y'].values
+
+missings = sample_submission.visitors.isnull()
+sample_submission.loc[missings, 'visitors'] = sample_submission[
+    missings].merge(
+        visitors[['air_store_id',
+                  'visitors']].groupby('air_store_id').mean().reset_index(),
+        on='air_store_id',
+        how='left')['visitors_y'].values
+
+sample_submission['visitors'] = sample_submission.visitors.map(pd.np.expm1)
+sub2 = sample_submission[['id', 'visitors']].copy()
+sub_merge = pd.merge(sub1, sub2, on='id', how='inner')
+
+sub_merge[
+    'visitors'] = 0.6 * sub_merge['visitors_x'] + 0.4 * sub_merge['visitors_y'] * 1.1
+sub_merge[['id', 'visitors']].to_csv('ens0_submission.csv', index=False)
